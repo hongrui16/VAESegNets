@@ -20,128 +20,8 @@ import random
 
 
 from utils import *
+from transform_fun import *
 
-
-class Normalize(object):
-    """Normalize a tensor image with mean and standard deviation.
-    Args:
-        mean (tuple): means for each channel.
-        std (tuple): standard deviations for each channel.
-    """
-    def __init__(self, mean=(0., 0., 0.), std=(1., 1., 1.), args = None):
-        self.mean = mean
-        self.std = std
-        self.args = args
-        
-    def __call__(self, sample):
-        img = sample['image']
-        mask = sample['label']
-        
-        # img_name = sample['img_name']
-        img = np.array(img).astype(np.float32)
-        if isinstance(mask, Image.Image):
-            mask = np.array(mask).astype(np.float32)
-
-        img /= 255.0
-        img -= self.mean
-        img /= self.std
-        # if img_name:
-        #     return {'image': img,
-        #         'label': mask,
-        #         'img_name':img_name}
-        # else:
-        #     return {'image': img,
-        #         'label': mask}
-        if self.args and self.args.with_background:
-            background = sample['background']
-            background = np.array(background).astype(np.float32)
-            background /= 255.0
-            background -= self.mean
-            background /= self.std
-            sample['background'] = background
-
-        sample['image'] = img
-        sample['label'] = mask
-        
-        return sample
-
-class ToTensor(object):
-    """Convert ndarrays in sample to Tensors."""
-    def __init__(self, args = None):
-        self.args = args
-        
-    def __call__(self, sample):
-        # swap color axis because
-        # numpy image: H x W x C
-        # torch image: C X H X W
-        img = sample['image']
-        mask = sample['label']
-        # img_name = sample['img_name']
-                
-        img = np.array(img)
-        if img.ndim == 3:
-           img = img.astype(np.float32).transpose((2, 0, 1))
-        else:
-            img = np.expand_dims(img, axis=0)
-        img = torch.from_numpy(img).float()
-        if isinstance(mask, Image.Image):
-            mask = np.array(mask).astype(np.float32)
-        mask = torch.from_numpy(mask).float()
-        if self.args and self.args.with_background:
-            background = sample['background']
-            background = np.array(background)
-            if background.ndim == 3:
-                background = background.astype(np.float32).transpose((2, 0, 1))
-            else:
-                background = np.expand_dims(background, axis=0)
-            background = torch.from_numpy(background).float()
-            sample['background'] = background
-        # if img_name:
-        #     return {'image': img,
-        #         'label': mask,
-        #         'img_name':img_name}
-        # else:
-        #     return {'image': img,
-        #         'label': mask}
-        sample['image'] = img
-        sample['label'] = mask
-        
-
-        return sample
-
-
-class FixedResize(object):
-    def __init__(self, size, args = None):
-        self.size = (size, size)  # size: (h, w)
-        self.args = args
-
-    def __call__(self, sample):
-        # if self.args.testValTrain <= 1:
-        #     return sample
-        img = sample['image']
-        mask = sample['label']
-        
-        # img_name = sample['img_name']
-        if isinstance(mask, Image.Image):
-            assert img.size == mask.size
-            mask = mask.resize(self.size, Image.NEAREST)
-        img = img.resize(self.size, Image.BILINEAR)
-
-        if self.args and self.args.with_background:
-            background = sample['background']
-            background = background.resize(self.size, Image.BILINEAR)
-            sample['background'] = background
-        # if img_name:
-        #     return {'image': img,
-        #         'label': mask,
-        #         'img_name':img_name}
-        # else:
-        #     return {'image': img,
-        #         'label': mask}
-        sample['image'] = img
-        sample['label'] = mask
-        
-        return sample
 
 
 class CustomDataset(Dataset):
@@ -152,17 +32,14 @@ class CustomDataset(Dataset):
         self.split = split
         self.ignore_index = args.ignore_index
         self.with_background = args.with_background
-        
+        self.dataset_name = args.dataset_name
         # print('args.ignore_index', args.ignore_index)
     
         txt_filepath = os.path.join(self.root, f'{self.split}.txt')
         self.img_filepaths = read_txt_to_list(txt_filepath)
         # print('self.img_filepaths ', len(self.img_filepaths) )
         self.img_filepaths = list(set(self.img_filepaths))
-        
-        if split == 'train':
-            self.img_filepaths = self.img_filepaths[:6000]
-        else:
+        if self.dataset_name == 'cdnet':
             self.img_filepaths = self.img_filepaths[:6000]
         random.shuffle(self.img_filepaths)
         
@@ -179,49 +56,85 @@ class CustomDataset(Dataset):
         img_name = img_path.split('/')[-1]
         img_dir = img_path[:img_path.find(img_name)]
 
-        lbl_name = img_name.replace('.jpg', '.png')
-        lbl_name = lbl_name.replace('in', 'gt')
-        
-        lbl_dir = img_dir.replace('input', 'groundtruth')
-        # lbl_path = img_path.replace('image', 'label').replace('.jpg', '.png')
-        lbl_path = os.path.join(lbl_dir, lbl_name)
-        img = cv2.imread(img_path)
-        # _img = Image.open(img_path).convert('RGB')
-        
-        
-        label = cv2.imread(lbl_path, 0).astype(np.uint8)
-
-        
-
-        ROI_filepath = os.path.join(img_dir[:img_dir.find('input')], 'ROI.bmp')            
-        roi = cv2.imread(ROI_filepath, 0)
-        h, w = roi.shape 
-        img = cv2.resize(img, (w,h))
-        label = cv2.resize(label, (w,h), interpolation=cv2.INTER_NEAREST)
-        roi_mask = roi==255
-        mask_3d = np.repeat(roi_mask[:, :, np.newaxis], 3, axis=2)
-        img *= mask_3d
-        label *= roi_mask
-
-        label, img = self.encode_segmap(label, img)
-        # print('_img.shape', _img.shape)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(img)
+        if self.dataset_name == 'cdnet':
+            lbl_name = img_name.replace('.jpg', '.png')
+            lbl_name = lbl_name.replace('in', 'gt')
+            
+            lbl_dir = img_dir.replace('input', 'groundtruth')
+            # lbl_path = img_path.replace('image', 'label').replace('.jpg', '.png')
+            lbl_path = os.path.join(lbl_dir, lbl_name)
+            img = cv2.imread(img_path)
+            # _img = Image.open(img_path).convert('RGB')
+            
+            
+            label = cv2.imread(lbl_path, 0).astype(np.uint8)
 
             
-        label = Image.fromarray(label)
 
-        if self.with_background:
-            background_filepath = os.path.join(img_dir[:img_dir.find('input')], 'background.jpg')
-            if not os.path.exists(background_filepath):
-                background_filepath = os.path.join(img_dir, 'in000001.jpg')
-            # print('background_filepath', background_filepath)
-            background = cv2.imread(background_filepath)
-            background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
-            background = Image.fromarray(background)
-            sample = {'image': img, 'label': label, 'background': background, 'img_name': img_name}
-        else:
-            sample = {'image': img, 'label': label, 'img_name': img_name}
+            ROI_filepath = os.path.join(img_dir[:img_dir.find('input')], 'ROI.bmp')            
+            roi = cv2.imread(ROI_filepath, 0)
+            h, w = roi.shape 
+            img = cv2.resize(img, (w,h))
+            label = cv2.resize(label, (w,h), interpolation=cv2.INTER_NEAREST)
+            roi_mask = roi==255
+            mask_3d = np.repeat(roi_mask[:, :, np.newaxis], 3, axis=2)
+            img *= mask_3d
+            label *= roi_mask
+
+            label, img = self.encode_segmap(label, img)
+            # print('_img.shape', _img.shape)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(img)
+
+                
+            label = Image.fromarray(label)
+
+            if self.with_background:
+                background_filepath = os.path.join(img_dir[:img_dir.find('input')], 'background.jpg')
+                if not os.path.exists(background_filepath):
+                    background_filepath = os.path.join(img_dir, 'in000001.jpg')
+                # print('background_filepath', background_filepath)
+                background = cv2.imread(background_filepath)
+                background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
+                background = Image.fromarray(background)
+                sample = {'image': img, 'label': label, 'background': background, 'img_name': img_name}
+            else:
+                sample = {'image': img, 'label': label, 'img_name': img_name}
+
+        elif self.dataset_name == 'bmc':
+            lbl_name = img_name.replace('.jpg', '.png')
+            
+            lbl_path = img_path.replace('image', 'groundtruth').replace('.jpg', '.png')
+            # lbl_path = img_path.replace('image', 'label').replace('.jpg', '.png')
+            # print(lbl_path)
+            img = cv2.imread(img_path)
+            # _img = Image.open(img_path).convert('RGB')
+            
+            
+            label = cv2.imread(lbl_path, 0).astype(np.uint8)
+
+        
+            label, img = self.encode_segmap(label, img)
+            # print('_img.shape', _img.shape)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(img)
+
+            h,w = label.shape
+            label = Image.fromarray(label)
+
+            if self.with_background:
+                background_filepath = os.path.join(img_dir[:img_dir.find('image')], 'background.jpg')
+                if not os.path.exists(background_filepath):
+                    background = np.zeros((h,w, 3), np.uint8)
+                # print('background_filepath', background_filepath)
+                else:
+                    background = cv2.imread(background_filepath)
+                    background = cv2.cvtColor(background, cv2.COLOR_BGR2RGB)
+                # print('background_filepath', background_filepath)
+                background = Image.fromarray(background)
+                sample = {'image': img, 'label': label, 'background': background, 'img_name': img_name}
+            else:
+                sample = {'image': img, 'label': label, 'img_name': img_name}
 
         
         return self.transform_sample(sample)
@@ -247,19 +160,26 @@ class CustomDataset(Dataset):
         170 : Unknown motion (usually around moving objects, due to semi-transparency and motion blur)
         255 : Motion
         '''        
-        if label.any() > 0:
-            mask_bk = label.copy()
-            
-            label[mask_bk == 0] = 0
-            label[mask_bk == 50] = 1
-            label[mask_bk == 170] = 0
-            label[mask_bk == 255] = 1
-            label[mask_bk==85] = self.args.ignore_index #255
-            
-        img = img.astype(np.uint8)
-        mask = mask_bk!=85
-        mask_3d = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
-        img *= mask_3d
+        if self.dataset_name == 'cdnet':
+            if label.any() > 0:
+                mask_bk = label.copy()
+                
+                label[mask_bk == 0] = 0
+                label[mask_bk == 50] = 1
+                label[mask_bk == 170] = 0
+                label[mask_bk == 255] = 1
+                label[mask_bk==85] = self.args.ignore_index #255
+                
+            img = img.astype(np.uint8)
+            mask = mask_bk!=85
+            mask_3d = np.repeat(mask[:, :, np.newaxis], 3, axis=2)
+            img *= mask_3d
+        elif self.dataset_name == 'bmc':
+            if label.any() > 0:
+                mask_bk = label.copy()
+                label[mask_bk == 0] = 0
+                label[mask_bk == 255] = 1
+                
         return label, img.astype(np.uint8)
 
     def transform_sample(self, sample):
@@ -298,7 +218,17 @@ class CustomDataset(Dataset):
 
         return composed_transforms(sample)
         
-    
+def transfer_tensor_to_bgr_image(img_tensor):
+    img_tmp = np.transpose(img_tensor.detach().cpu().numpy()[0], axes=[1, 2, 0])
+    img_tmp *= (0.229, 0.224, 0.225)
+    img_tmp += (0.485, 0.456, 0.406)
+    min_value = img_tmp.min()
+    max_value = img_tmp.max()
+    img_tmp = (img_tmp-min_value)/(max_value-min_value)
+    img_tmp *= 255.0
+    img_bgr = img_tmp[:,:,::-1]
+    img_bgr = img_bgr.astype(np.uint8)
+    return img_bgr
 
 if __name__ == '__main__':
     # from dataloaders.utils import decode_segmap

@@ -102,5 +102,121 @@ def process_background_filepath():
         bk_filepath = os.path.join(img_dir[:img_dir.find('input')], 'background.jpg')
         shutil.copy(img_path, bk_filepath)
 
+
+
+def process_bmc_data(data_index, split):
+    img_video_dir = f'D:/hongRui/GMU_course/CS782/Project/src/data/bmc_synth{data_index}/input'
+    gt_video_dir = f'D:/hongRui/GMU_course/CS782/Project/src/data/bmc_synth{data_index}/gt'
+    output_dir = f'D:/hongRui/GMU_course/CS782/Project/src/data/bmc/{split}'
+
+    video_names = os.listdir(img_video_dir)
+    
+    for i, v_name in enumerate(video_names):
+        img_video_filepath = os.path.join(img_video_dir, v_name)
+        gt_name = v_name.split('.')[0] + '_gt.mp4'
+        gt_video_filepath = os.path.join(gt_video_dir, gt_name)
+        img_cam = cv2.VideoCapture(img_video_filepath)
+        gt_cam = cv2.VideoCapture(gt_video_filepath)
+
+        total_img_num = int(img_cam.get(cv2.CAP_PROP_FRAME_COUNT))
+        total_gt_num = int(gt_cam.get(cv2.CAP_PROP_FRAME_COUNT))
+        # print(f'{v_name}, total_img_num: {total_img_num}, total_gt_num: {total_gt_num}')
+        output_img_dir = os.path.join(output_dir, v_name.split('.')[0], 'image')
+        output_gt_dir = os.path.join(output_dir, v_name.split('.')[0], 'groundtruth')
+        os.makedirs(output_img_dir,exist_ok=True)
+        os.makedirs(output_gt_dir,exist_ok=True)
+        # frame
+        currentframe = 0
+        
+        ret, gt = gt_cam.read()
+        print(f'gt.shape: {gt.shape}')
+        while(True):
+            
+            # reading from frame
+            img_ret, img = img_cam.read()
+            gt_ret, gt = gt_cam.read()
+            # print(f'{currentframe}, gt.shape: {gt.shape}')
+            print(f'{currentframe}, {v_name}, {i}/ {len(video_names)}')
+            
+            currentframe += 1
+            if not currentframe % 3 == 0:
+                continue
+            if img_ret and gt_ret:
+                gt = gt[:,:,0]
+                img_name = v_name.split('.')[0] + f"_{str(currentframe).rjust(5, '0')}.jpg"
+                gt_name = v_name.split('.')[0] + f"_{str(currentframe).rjust(5, '0')}.png"
+                img_filepath = os.path.join(output_img_dir, img_name)
+                gt_filepath = os.path.join(output_gt_dir, gt_name)
+                cv2.imwrite(img_filepath, img)
+                cv2.imwrite(gt_filepath, gt)
+        
+                # increasing counter so that it will
+                # show how many frames are created
+                
+            else:
+                break
+        
+        # Release all space and windows once done
+        img_cam.release()
+        gt_cam.release()
+        cv2.destroyAllWindows()
+
+
+
+def create_imgfilepath_txt_for_bmc(split):
+
+
+    root_dir =      'D:/hongRui/GMU_course/CS782/Project/src/data/bmc/'
+    root_data_dir = f'D:/hongRui/GMU_course/CS782/Project/src/data/bmc/{split}'
+
+    
+
+    # train_filepaths = []
+    # test_filepaths = []
+    # train_background_filepath = []
+    # test_background_filepath = []
+    positive_img_filepaths = []
+    for i, first_name in enumerate(os.listdir(root_data_dir)):
+        first_abs_dir = os.path.join(root_data_dir, first_name)#, second_dir, third_dir)
+        img_dir = os.path.join(first_abs_dir, 'image') 
+        lbl_dir = os.path.join(first_abs_dir, 'groundtruth') 
+        img_names = os.listdir(img_dir)
+        first_flag = True
+        
+        for j, img_name in enumerate(img_names):
+            img_filepath = os.path.join(img_dir, img_name)
+            lbl_filepath = img_filepath.replace('image', 'groundtruth').replace('.jpg', '.png')
+            print(f'{i}/{len(os.listdir(root_data_dir))},  {j}/{len(img_names)} {img_filepath}')
+
+            if os.path.exists(img_filepath) and os.path.exists(lbl_filepath):
+                label = cv2.imread(lbl_filepath, 0)
+                
+                if len(label[label>0]) <= 0:
+                    if first_flag:      
+                        bk_filepath = os.path.join(first_abs_dir, 'background.jpg')
+                        shutil.copy(img_filepath, bk_filepath)
+                        first_flag = False
+                else:
+                    positive_img_filepaths.append(img_filepath)
+
+                
+    txt_filepath = os.path.join(root_dir, f'{split}.txt')
+    if os.path.exists(txt_filepath):
+        os.remove(txt_filepath)
+    write_list_to_txt(txt_filepath, positive_img_filepaths)
+
+    # txt_filepath = os.path.join(root_dir, 'test.txt')
+    # if os.path.exists(txt_filepath):
+    #     os.remove(txt_filepath)
+    # write_list_to_txt(txt_filepath, test_filepaths)
+        
+    
+
+
 # create_imgfilepath_txt()
-process_background_filepath()
+# process_background_filepath()
+process_bmc_data(1, 'train')
+create_imgfilepath_txt_for_bmc('train')
+
+process_bmc_data(2, 'test')
+create_imgfilepath_txt_for_bmc('test')

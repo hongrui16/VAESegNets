@@ -17,6 +17,7 @@ import pytz
 import datetime
 import csv
 from matplotlib import pyplot as plt
+import pandas as pd
 
 def write_list_to_txt(txt_filepath, lists):
     f = open(txt_filepath, "a+")
@@ -125,80 +126,31 @@ class EvaluatorForeground(object):
 
 
 
-def plot_loss(trainingEpoch_loss, valEpoch_loss, exp_dir, name = '', postfix = ''):
+def plot_loss(trainingEpoch_loss, valEpoch_loss, exp_dir, name = '', postfix = '_'):
     # fig = plt.figure()
-    plt.plot(trainingEpoch_loss, f'training {postfix}loss')
-    plt.plot(valEpoch_loss, f'val {postfix}loss')
+    plt.plot(trainingEpoch_loss, label = f'training_{postfix}_loss')
+    plt.plot(valEpoch_loss, label = f'val_{postfix}_loss')
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
-    plt.savefig(os.path.join(exp_dir, f"{name}_loss.jpg"))
+    plt.savefig(os.path.join(exp_dir, f"{name}_{postfix}_loss.jpg"))
     plt.close()
 
 
 def plot_mIou_f1score(mIou, f1_score, exp_dir, name = '', postfix = ''):
     # fig = plt.figure()
-    plt.plot(mIou, 'mIou')
-    plt.plot(f1_score, 'f1_score')
+    plt.plot(mIou, label = 'mIou')
+    plt.plot(f1_score, label = 'f1_score')
     plt.xlabel("Epoch")
     plt.ylabel("value")
     plt.legend()
     plt.savefig(os.path.join(exp_dir, f"{name}_metrics.jpg"))
     plt.close()
 
-
-def load_weight_plot_loss():
-    g_weight_filepath = 'logs/VAEUNet/run_0/VAEUNet_checkpoint.pth.tar'
-    checkpoint = torch.load(g_weight_filepath, map_location=torch.device('cpu'))
-
-    g_trainingEpoch_loss = checkpoint['trainingEpoch_loss']
-    g_valEpoch_loss = checkpoint['valEpoch_loss']
-    plot_loss(g_trainingEpoch_loss, g_valEpoch_loss, 'logs/LikeUNet/run_1', 'LikeUNet')
-        
-
-def load_weight_plot_loss_miou():
-    g_weight_filepath = 'logs/LikeUNet/run_1/LikeUNet_checkpoint.pth.tar'
-    checkpoint = torch.load(g_weight_filepath, map_location=torch.device('cpu'))
-
-    g_trainingEpoch_loss = checkpoint['trainingEpoch_loss']
-    g_valEpoch_loss = checkpoint['valEpoch_loss']
-    trainingEpoch_loss += checkpoint['trainingEpoch_loss']
-    valEpoch_loss += checkpoint['valEpoch_loss']
-    epoch_f1_score += checkpoint['epoch_f1_score']
-    epoch_mIou += checkpoint['epoch_mIou']
-    
-    plot_loss(g_trainingEpoch_loss, g_valEpoch_loss, 'logs/LikeUNet/run_1', 'LikeUNet')
+def put_text_on_img(img, text):
+    font_scale = 1.1
+    img = cv2.putText(img, f"{text}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), 2)
+    return img
 
 
-if __name__ == "__main__":
 
-    txt_filepath = 'D:/hongRui/GMU_course/CS782/Project/src/data/CDnet2014/badWeather/blizzard/temporalROI.txt'
-    # print(get_temporalROI_from_txt(txt_filepath))
-
-    a = '1'
-    b = a.rjust(6, '0')
-    print('x'+b)
-
-    a = 'D:/hongRui/GMU_course/CS782/Project/src/data/CDnet2014/data\\turbulence\\turbulence3\\input\\in002192.jpg'
-    # b = a.split('/') #['D:', 'hongRui', 'GMU_course', 'CS782', 'Project', 'src', 'data', 'CDnet2014', 'data\\turbulence\\turbulence3\\input\\in002192.jpg']
-    # b = a.split('\\') ##['D:/hongRui/GMU_course/CS782/Project/src/data/CDnet2014/data', 'turbulence', 'turbulence3', 'input', 'in002192.jpg']
-    # b = a.replace('\\', '/').split('/') #['D:', 'hongRui', 'GMU_course', 'CS782', 'Project', 'src', 'data', 'CDnet2014', 'data', 'turbulence', 'turbulence3', 'input', 'in002192.jpg']
-    # print(b)
-    a = np.random.random((4,2,6,6))
-    b = np.argmax(a, axis=1)
-    # print(b.shape, b)
-
-    # a = np.random.random((2,1,3,3))
-    # a[a>=0.5] = 1
-    # a[a<0.5] = 0
-    # print(a.shape, a)
-    # a = a.squeeze()
-    # print(a.shape, a)
-    # load_weight_plot_loss()
-    a = torch.tensor([[1, 2], [2, 3]])
-    b = torch.tensor([[[1,2],[2,3]],[[-1,-2],[-2,-3]]])
-    print(b.shape)
-    x = torch.randn((2,1,3)) 
-    print(x)
-    x= x.repeat(1, 2, 1)
-    print(x)

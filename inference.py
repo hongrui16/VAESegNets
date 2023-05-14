@@ -493,7 +493,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--img_size", type=int, default=256, help="size of each image dimension")
     parser.add_argument("--ignore_index", type=int, default=255, help="ignore_index")
-    parser.add_argument('--with_background', action='store_true', default=True, #True, False
+    parser.add_argument('--with_background', action='store_true', default=False, #True, False
                     help='with_background image')
     parser.add_argument('--dataset_dir', type=str, default='data/CDnet2014', help='dataset dir')
     parser.add_argument('--resume', type=str, default=None, help='resume')

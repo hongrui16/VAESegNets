@@ -18,7 +18,7 @@ import torch.nn.functional as F
 import torch
 from model import bscGeneator, bscDiscriminator, LikeUNet, VAEUNet
 import glob
-from dataloader import CustomDataset
+from dataloader import CustomDataset, transfer_tensor_to_bgr_image
 # os.makedirs("images", exist_ok=True)
 
 import logging
@@ -50,9 +50,10 @@ class bscGanWorker(object):
             print("running on the CPU")
 
         self.threshold = 0.5
-        log_dir = sorted(glob.glob(os.path.join('logs', 'bscGan', 'run_*')), key=lambda x: int(x.split('_')[-1]))
+        self.dataset_name = args.dataset_name
+        log_dir = sorted(glob.glob(os.path.join('logs', 'bscGan', self.dataset_name, 'run_*')), key=lambda x: int(x.split('_')[-1]))
         run_id = int(log_dir[-1].split('_')[-1]) + 1 if log_dir else 0
-        exp_dir = os.path.join('logs', 'bscGan', 'run_{}'.format(str(run_id)))
+        exp_dir = os.path.join('logs', 'bscGan', self.dataset_name, 'run_{}'.format(str(run_id)))
         print('exp_dir', exp_dir)
         os.makedirs(exp_dir, exist_ok=True)
 
@@ -399,9 +400,9 @@ class LikeUNetWorker(object):
 
         self.model_name = 'LikeUNet'
         self.threshold = 0.5
-        log_dir = sorted(glob.glob(os.path.join('logs', 'LikeUNet', 'run_*')), key=lambda x: int(x.split('_')[-1]))
+        log_dir = sorted(glob.glob(os.path.join('logs', 'LikeUNet', args.dataset_name, 'run_*')), key=lambda x: int(x.split('_')[-1]))
         run_id = int(log_dir[-1].split('_')[-1]) + 1 if log_dir else 0
-        exp_dir = os.path.join('logs', 'LikeUNet', 'run_{}'.format(str(run_id)))
+        exp_dir = os.path.join('logs', 'LikeUNet', args.dataset_name, 'run_{}'.format(str(run_id)))
         print('exp_dir', exp_dir)
         os.makedirs(exp_dir, exist_ok=True)
 
@@ -658,9 +659,9 @@ class VAEUNetWorker(object):
 
         self.model_name = 'VAEUNet'
         self.threshold = 0.5
-        log_dir = sorted(glob.glob(os.path.join('logs', self.model_name, 'run_*')), key=lambda x: int(x.split('_')[-1]))
+        log_dir = sorted(glob.glob(os.path.join('logs', self.model_name, args.dataset_name, 'run_*')), key=lambda x: int(x.split('_')[-1]))
         run_id = int(log_dir[-1].split('_')[-1]) + 1 if log_dir else 0
-        exp_dir = os.path.join('logs', self.model_name, 'run_{}'.format(str(run_id)))
+        exp_dir = os.path.join('logs', self.model_name, args.dataset_name, 'run_{}'.format(str(run_id)))
         print('exp_dir', exp_dir)
         os.makedirs(exp_dir, exist_ok=True)
 
@@ -736,11 +737,11 @@ class VAEUNetWorker(object):
             if not fine_tune:
                 self.start_epoch = checkpoint['epoch']
                 self.best_pred = checkpoint['best_pred']
-                self.model.load_state_dict(checkpoint['optimizer'])
-                self.trainingEpoch_loss += checkpoint['trainingEpoch_loss']
-                self.valEpoch_loss += checkpoint['valEpoch_loss']
-                self.epoch_f1_score += checkpoint['epoch_f1_score']
-                self.epoch_mIou += checkpoint['epoch_mIou']
+                self.optimizer.load_state_dict(checkpoint['optimizer'])
+                # self.trainingEpoch_loss += checkpoint['trainingEpoch_loss']
+                # self.valEpoch_loss += checkpoint['valEpoch_loss']
+                # self.epoch_f1_score += checkpoint['epoch_f1_score']
+                # self.epoch_mIou += checkpoint['epoch_mIou']
                 
         
 
@@ -779,17 +780,26 @@ class VAEUNetWorker(object):
         rec_step_loss = []
         kl_step_loss = []
 
+        epoch_cnt = epoch - self.start_epoch
+        lambda_seg = 1000 - 50*epoch_cnt if 1000 - 50*epoch_cnt > 500 else 500
+        lambda_kl = 0.01*(10*epoch_cnt + 1) if 0.01*(10*epoch_cnt + 1) <= 10 else 10
+        lambda_rec = 0.01
+
         # for iter, sample in enumerate(tbar):
         for iter, sample in enumerate(tbar):
             # print(f'rank {self.args.rank} dataload time {round(time.time() - start, 3)}')
             # start = time.time()
             if self.args.with_background:
-                image, label, background, img_name = sample['image'], sample['label'], sample['background'], sample['img_name']
-                image = torch.cat((image, background), 1)
+                image_f, label, background, img_name = sample['image'], sample['label'], sample['background'], sample['img_name']
+                image = torch.cat((image_f, background), 1)
+                image = image.to(self.device)
+                image_f = image_f.to(self.device)
             else:
-                image, label, img_name = sample['image'], sample['label'], sample['img_name']
-            image, label = image.to(self.device), label.to(self.device)
+                image_f, label, img_name = sample['image'], sample['label'], sample['img_name']
+                image_f = image_f.to(self.device)
+                image = image_f
             
+            label = label.to(self.device)
 
             self.optimizer.zero_grad()
 
@@ -804,13 +814,17 @@ class VAEUNetWorker(object):
 
             # Loss measures generator's ability to fool the discriminator
             seg_loss = self.seg_criterion(seg, label)
-            temp_lable = torch.unsqueeze(label, 1).repeat(1,3,1,1)
-            rec_loss = self.recons_criterion(p_x.mul(temp_lable), p_x.mul(image))
+            
+            if self.args.reconstract_whole_image:
+                rec_loss = self.recons_criterion(p_x, image_f)
+            else:
+                temp_lable = torch.unsqueeze(label, 1).repeat(1,3,1,1)
+                rec_loss = self.recons_criterion(p_x.mul(temp_lable), image_f.mul(temp_lable))
             kl_loss = self.kl_criterion(mu, logvar) 
             # print('seg_loss', seg_loss) # tensor(0.0625, device='cuda:0', grad_fn=<MulBackward0>)
             # print('rec_loss', rec_loss.shape) # tensor(207.9003, device='cuda:0', grad_fn=<MeanBackward1>)
             # print('kl_loss', kl_loss) #
-            loss = seg_loss*100 + rec_loss + kl_loss/100
+            loss = seg_loss*lambda_seg + rec_loss*lambda_rec + kl_loss*lambda_kl
             loss.backward()
             self.optimizer.step()
             self.scheduler(self.optimizer, iter, epoch)
@@ -865,6 +879,11 @@ class VAEUNetWorker(object):
         seg_step_loss = []
         rec_step_loss = []
         kl_step_loss = []
+        epoch_cnt = epoch - self.start_epoch
+
+        lambda_seg = 1000 - 50*epoch_cnt if 1000 - 50*epoch_cnt > 500 else 500
+        lambda_kl = 0.01*(10*epoch_cnt + 1) if 0.01*(10*epoch_cnt + 1) <= 10 else 10
+        lambda_rec = 0.01
 
         for iter, sample in enumerate(tbar):
             # print(f'rank {self.args.rank} dataload time {round(time.time() - start, 3)}')
@@ -872,11 +891,16 @@ class VAEUNetWorker(object):
             
             # print('target', target.size(), image.size())
             if self.args.with_background:
-                image, label, background, img_name = sample['image'], sample['label'], sample['background'], sample['img_name']
-                image = torch.cat((image, background), 1)
+                image_f, label, background, img_name = sample['image'], sample['label'], sample['background'], sample['img_name']
+                image = torch.cat((image_f, background), 1)
+                image = image.to(self.device)
+                image_f = image_f.to(self.device)
             else:
-                image, label, img_name = sample['image'], sample['label'], sample['img_name']
-            image, label = image.to(self.device), label.to(self.device)
+                image_f, label, img_name = sample['image'], sample['label'], sample['img_name']
+                image_f = image_f.to(self.device)
+                image = image_f
+            
+            label = label.to(self.device)
 
 
             self.optimizer.zero_grad()
@@ -886,10 +910,14 @@ class VAEUNetWorker(object):
                 seg, p_x, mu, logvar = self.model(image)
 
             seg_loss = self.seg_criterion(seg, label)
-            temp_lable = torch.unsqueeze(label, 1).repeat(1,3,1,1)
-            rec_loss = self.recons_criterion(p_x.mul(temp_lable), p_x.mul(image))
+            if self.args.reconstract_whole_image:
+                rec_loss = self.recons_criterion(p_x, image_f)
+            else:
+                temp_lable = torch.unsqueeze(label, 1).repeat(1,3,1,1)
+                rec_loss = self.recons_criterion(p_x.mul(temp_lable), image_f.mul(temp_lable))
+                
             kl_loss = self.kl_criterion(mu, logvar)
-            loss = seg_loss*100 + rec_loss + kl_loss/100
+            loss = seg_loss*lambda_seg + rec_loss*lambda_rec + kl_loss*lambda_kl
 
 
             pred = seg.data.cpu().numpy()
@@ -958,23 +986,27 @@ class VAEUNetWorker(object):
             'best_pred': self.best_pred,
         }, is_best_epoch, self.model_name)
 
-
-
+    
+       
     def forward(self):
         try:
+            cnt = 1
             for epoch in range(self.start_epoch, self.args.n_epochs):
                 self.training(epoch)
                 self.validation(epoch)
-            plot_loss(self.trainingEpoch_loss, self.valEpoch_loss, self.exp_dir, f'{self.model_name}')
-            plot_loss(self.trainingEpoch_seg_loss, self.valEpoch_seg_loss, self.exp_dir, f'{self.model_name}-seg', 'seg')
-            plot_loss(self.trainingEpoch_rec_loss, self.valEpoch_rec_loss, self.exp_dir, f'{self.model_name}-recons', 'recons')
-            plot_loss(self.trainingEpoch_kl_loss, self.valEpoch_kl_loss, self.exp_dir, f'{self.model_name}-kl', 'kl')
+                cnt += 1
+                if self.args.debug and cnt > 3:
+                    break
+            plot_loss(self.trainingEpoch_loss, self.valEpoch_loss, self.exp_dir, f'{self.model_name}', 'total')
+            plot_loss(self.trainingEpoch_seg_loss, self.valEpoch_seg_loss, self.exp_dir, f'{self.model_name}', 'seg')
+            plot_loss(self.trainingEpoch_rec_loss, self.valEpoch_rec_loss, self.exp_dir, f'{self.model_name}', 'recons')
+            plot_loss(self.trainingEpoch_kl_loss, self.valEpoch_kl_loss, self.exp_dir, f'{self.model_name}', 'kl')
             plot_mIou_f1score(self.epoch_mIou, self.epoch_f1_score, self.exp_dir, self.model_name)
         except KeyboardInterrupt:
-            plot_loss(self.trainingEpoch_loss, self.valEpoch_loss, self.exp_dir, f'{self.model_name}')
-            plot_loss(self.trainingEpoch_seg_loss, self.valEpoch_seg_loss, self.exp_dir, f'{self.model_name}-seg', 'seg')
-            plot_loss(self.trainingEpoch_rec_loss, self.valEpoch_rec_loss, self.exp_dir, f'{self.model_name}-recons', 'recons')
-            plot_loss(self.trainingEpoch_kl_loss, self.valEpoch_kl_loss, self.exp_dir, f'{self.model_name}-kl', 'kl')
+            plot_loss(self.trainingEpoch_loss, self.valEpoch_loss, self.exp_dir, f'{self.model_name}', 'total')
+            plot_loss(self.trainingEpoch_seg_loss, self.valEpoch_seg_loss, self.exp_dir, f'{self.model_name}', 'seg')
+            plot_loss(self.trainingEpoch_rec_loss, self.valEpoch_rec_loss, self.exp_dir, f'{self.model_name}', 'recons')
+            plot_loss(self.trainingEpoch_kl_loss, self.valEpoch_kl_loss, self.exp_dir, f'{self.model_name}', 'kl')
             plot_mIou_f1score(self.epoch_mIou, self.epoch_f1_score, self.exp_dir, self.model_name)
         self.write_log_to_txt(f"best f1_score: {self.best_pred:4f}")
 
@@ -993,8 +1025,8 @@ def main(args):
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_epochs", type=int, default=65, help="number of epochs of training")
-    parser.add_argument("--batch_size", type=int, default=32, help="size of the batches")
+    parser.add_argument("--n_epochs", type=int, default=55, help="number of epochs of training")
+    parser.add_argument("--batch_size", type=int, default=16, help="size of the batches")
     parser.add_argument("--lr", type=float, default=0.0005, help="adam: learning rate")
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -1004,19 +1036,23 @@ if __name__ == '__main__':
 
     parser.add_argument("--img_size", type=int, default=256, help="size of each image dimension")
     parser.add_argument("--ignore_index", type=int, default=255, help="ignore_index")
-    parser.add_argument('--with_background', action='store_true', default=False,
+    parser.add_argument('--with_background', action='store_true', default=False, #True, False
                     help='with_background image')
-    parser.add_argument('--dataset_dir', type=str, default='data/CDnet2014', help='dataset dir')
+    
     parser.add_argument('--resume', type=str, default=None, help='resume')
     parser.add_argument('--resume2', type=str, default=None, help='resume')
     parser.add_argument('--ft', action='store_true', default=False,
                     help='Fine tune')
-    parser.add_argument('--debug', action='store_true', default=False, #True
+    parser.add_argument('--debug', action='store_true', default=False, #True, False
                     help='debug mode')
+    parser.add_argument('--reconstract_whole_image', action='store_true', default=False, #True, False
+                    help='reconstract_whole_image')
     # parser.add_argument('--model_name', type=str, default='bscGAN', help='model_name')
     # parser.add_argument('--model_name', type=str, default='LikeUNet', help='model_name')
-    parser.add_argument('--model_name', type=str, default='VAEUNet', help='model_name')
+    parser.add_argument('--model_name', type=str, default='VAEUNet', help='model_name, ie. bscGAN, LikeUNet, or VAEUNet')
     parser.add_argument('--loss_type', type=str, default='focal', help='loss_type')
+    parser.add_argument('--dataset_name', type=str, default='bmc', help='cdnet or bmc')
+    parser.add_argument('--dataset_dir', type=str, default='data/bmc', help='dataset dir, data/CDnet2014 or data/bmc')
     
     opt = parser.parse_args()
 
