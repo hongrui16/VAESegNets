@@ -1,0 +1,1 @@
+python main.py --resume logs/bscGAN/run_1/generator_checkpoint.pth.tar --resume2 logs/bscGAN/run_1/discriminator_checkpoint.pth.tar
