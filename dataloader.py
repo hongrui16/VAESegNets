@@ -38,10 +38,20 @@ class CustomDataset(Dataset):
         txt_filepath = os.path.join(self.root, f'{self.split}.txt')
         self.img_filepaths = read_txt_to_list(txt_filepath)
         # print('self.img_filepaths ', len(self.img_filepaths) )
-        self.img_filepaths = list(set(self.img_filepaths))
+
         if self.dataset_name == 'cdnet':
             self.img_filepaths = self.img_filepaths[:6000]
-        random.shuffle(self.img_filepaths)
+            
+        elif self.dataset_name == 'bmc':
+            self.img_filepaths = self.img_filepaths[:3200]
+            if split == 'test':
+                temp_list = []
+                for i, line in enumerate(self.img_filepaths):
+                    if i %2 == 0:
+                        temp_list.append(line)
+                self.img_filepaths = temp_list
+        if split == 'train':
+            random.shuffle(self.img_filepaths)
         
 
 

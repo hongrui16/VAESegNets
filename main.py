@@ -48,8 +48,8 @@ class bscGanWorker(object):
         else:
             self.device = torch.device("cpu")
             print("running on the CPU")
-
-        self.threshold = 0.5
+        self.model_name = 'bscGan'
+        self.threshold = 0.11
         self.dataset_name = args.dataset_name
         log_dir = sorted(glob.glob(os.path.join('logs', 'bscGan', self.dataset_name, 'run_*')), key=lambda x: int(x.split('_')[-1]))
         run_id = int(log_dir[-1].split('_')[-1]) + 1 if log_dir else 0
@@ -77,9 +77,9 @@ class bscGanWorker(object):
         self.generator.to(self.device)
         self.discriminator.to(self.device)
 
-        # # Initialize weights
-        self.generator.apply(weights_init_normal)
-        self.discriminator.apply(weights_init_normal)
+        # # # Initialize weights
+        # self.generator.apply(weights_init_normal)
+        # self.discriminator.apply(weights_init_normal)
 
 
         self.optimizer_G = torch.optim.Adam(self.generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
@@ -116,6 +116,8 @@ class bscGanWorker(object):
         self.g_valEpoch_loss = []
         self.d_trainingEpoch_loss = []
         self.d_valEpoch_loss = []
+        self.epoch_f1_score = []
+        self.epoch_mIou = []
 
         g_weight_filepath = args.resume
         fine_tune = False
@@ -125,7 +127,7 @@ class bscGanWorker(object):
             self.generator.load_state_dict(checkpoint['state_dict'])
             if not fine_tune:
                 self.start_epoch = checkpoint['epoch']
-                self.generator.load_state_dict(checkpoint['optimizer'])
+                self.optimizer_G.load_state_dict(checkpoint['optimizer'])
                 self.g_trainingEpoch_loss += checkpoint['trainingEpoch_loss']
                 self.g_valEpoch_loss += checkpoint['valEpoch_loss']
                 self.best_pred += checkpoint['best_pred']
@@ -136,7 +138,7 @@ class bscGanWorker(object):
             checkpoint = torch.load(d_weight_filepath, map_location=torch.device('cpu'))
             self.discriminator.load_state_dict(checkpoint['state_dict'])
             if not fine_tune:
-                self.discriminator.load_state_dict(checkpoint['optimizer'])
+                self.optimizer_D.load_state_dict(checkpoint['optimizer'])
                 self.d_trainingEpoch_loss += checkpoint['trainingEpoch_loss']
                 self.d_valEpoch_loss += checkpoint['valEpoch_loss']
 
@@ -332,6 +334,8 @@ class bscGanWorker(object):
 
         mIoU = self.evaluator.Mean_Intersection_over_Union()
         f1_score = self.evaluator.F1_Score()
+        self.epoch_mIou.append(mIoU)
+        self.epoch_f1_score.append(f1_score)
         epoch_g_loss = np.array(step_g_loss).mean()
         epoch_d_loss = np.array(step_d_loss).mean()
         self.writer.add_scalar('val/epoch_g_loss', epoch_g_loss, epoch)
@@ -377,11 +381,14 @@ class bscGanWorker(object):
             for epoch in range(self.start_epoch, self.args.n_epochs):
                 self.training(epoch)
                 self.validation(epoch)
-            plot_loss(self.g_trainingEpoch_loss, self.g_valEpoch_loss, self.exp_dir, 'generator')
-            plot_loss(self.d_trainingEpoch_loss, self.d_valEpoch_loss, self.exp_dir, 'discriminator')
+            plot_loss(self.g_trainingEpoch_loss, self.g_valEpoch_loss, self.exp_dir, 'generator', 'sum')
+            plot_loss(self.d_trainingEpoch_loss, self.d_valEpoch_loss, self.exp_dir, 'discriminator', 'sum')
+            plot_mIou_f1score(self.epoch_mIou, self.epoch_f1_score, self.exp_dir, self.model_name)
+
         except KeyboardInterrupt:
-            plot_loss(self.g_trainingEpoch_loss, self.g_valEpoch_loss, self.exp_dir, 'generator')
-            plot_loss(self.d_trainingEpoch_loss, self.d_valEpoch_loss, self.exp_dir, 'discriminator')
+            plot_loss(self.g_trainingEpoch_loss, self.g_valEpoch_loss, self.exp_dir, 'generator', 'sum')
+            plot_loss(self.d_trainingEpoch_loss, self.d_valEpoch_loss, self.exp_dir, 'discriminator', 'sum')
+            plot_mIou_f1score(self.epoch_mIou, self.epoch_f1_score, self.exp_dir, self.model_name)
         self.write_log_to_txt(f"best f1_score: {self.best_pred:4f}")
 
 
@@ -392,11 +399,12 @@ class LikeUNetWorker(object):
 
         if torch.cuda.is_available():
             self.device = torch.device("cuda:0")
-            print("running on the GPU")
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+            print("running on the GPU--------------------------------------------------------")
             self.cuda = True
         else:
             self.device = torch.device("cpu")
-            print("running on the CPU")
+            print("running on the CPU+++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 
         self.model_name = 'LikeUNet'
         self.threshold = 0.5
@@ -600,7 +608,11 @@ class LikeUNetWorker(object):
 
         mIoU = self.evaluator.Mean_Intersection_over_Union()
         f1_score = self.evaluator.F1_Score()
+        self.epoch_mIou.append(mIoU)
+        self.epoch_f1_score.append(f1_score)
+
         epoch_loss = np.array(step_loss).mean()
+
         self.writer.add_scalar('val/epoch_loss', epoch_loss, epoch)
         self.writer.add_scalar('val/mIoU', mIoU, epoch)
         self.writer.add_scalar('val/f1_score', f1_score, epoch)
@@ -639,8 +651,12 @@ class LikeUNetWorker(object):
                 self.training(epoch)
                 self.validation(epoch)
             plot_loss(self.trainingEpoch_loss, self.valEpoch_loss, self.exp_dir, self.model_name)
+            plot_mIou_f1score(self.epoch_mIou, self.epoch_f1_score, self.exp_dir, self.model_name)
+
         except KeyboardInterrupt:
             plot_loss(self.trainingEpoch_loss, self.valEpoch_loss, self.exp_dir, self.model_name)
+            plot_mIou_f1score(self.epoch_mIou, self.epoch_f1_score, self.exp_dir, self.model_name)
+
         self.write_log_to_txt(f"best f1_score: {self.best_pred:4f}")
 
 
@@ -651,11 +667,13 @@ class VAEUNetWorker(object):
 
         if torch.cuda.is_available():
             self.device = torch.device("cuda:0")
-            print("running on the GPU")
+            print("running on the GPU--------------------------------------------------------")
             self.cuda = True
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
         else:
             self.device = torch.device("cpu")
-            print("running on the CPU")
+            print("running on the CPU++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 
         self.model_name = 'VAEUNet'
         self.threshold = 0.5
@@ -693,9 +711,9 @@ class VAEUNetWorker(object):
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
 
-        self.seg_criterion = SegmentationLosses(cuda=self.cuda, args = args).build_loss(type=args.loss_type)
-        self.kl_criterion = SegmentationLosses(cuda=self.cuda, args = args).build_loss(type='kl')
-        self.recons_criterion = SegmentationLosses(cuda=self.cuda, args = args).build_loss(type='mse')
+        self.seg_criterion = SegmentationLosses(cuda=self.cuda, args = args, device= self.device).build_loss(type=args.loss_type)
+        self.kl_criterion = SegmentationLosses(cuda=self.cuda, args = args, device= self.device).build_loss(type='kl')
+        self.recons_criterion = SegmentationLosses(cuda=self.cuda, args = args, device= self.device).build_loss(type='mse')
 
         trainset = CustomDataset(args, split="train")
         testset = CustomDataset(args, split="test")
@@ -881,8 +899,8 @@ class VAEUNetWorker(object):
         kl_step_loss = []
         epoch_cnt = epoch - self.start_epoch
 
-        lambda_seg = 1000 - 50*epoch_cnt if 1000 - 50*epoch_cnt > 500 else 500
-        lambda_kl = 0.01*(10*epoch_cnt + 1) if 0.01*(10*epoch_cnt + 1) <= 10 else 10
+        lambda_seg = 1000 - 50*epoch_cnt    if 1000 - 50*epoch_cnt > 500        else 500
+        lambda_kl = 0.01*(10*epoch_cnt + 1) if 0.01*(10*epoch_cnt + 1) <= 10    else 10
         lambda_rec = 0.01
 
         for iter, sample in enumerate(tbar):
@@ -1025,8 +1043,8 @@ def main(args):
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_epochs", type=int, default=55, help="number of epochs of training")
-    parser.add_argument("--batch_size", type=int, default=16, help="size of the batches")
+    parser.add_argument("--n_epochs", type=int, default=40, help="number of epochs of training")
+    parser.add_argument("--batch_size", type=int, default=32, help="size of the batches")
     parser.add_argument("--lr", type=float, default=0.0005, help="adam: learning rate")
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")

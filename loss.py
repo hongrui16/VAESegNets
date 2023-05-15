@@ -29,12 +29,12 @@ class FocalLossObj(nn.Module):
 
 
 class SegmentationLosses(object):
-    def __init__(self, weight=None, size_average=True, batch_average=True, ignore_index=255, cuda=False, args = None):
+    def __init__(self, weight=None, size_average=True, batch_average=True, ignore_index=255, cuda=False, args = None, device = None):
         if args and args.ignore_index >= 0:
             self.ignore_index = args.ignore_index
         else:
             self.ignore_index = ignore_index
- 
+        self.device = device
         self.weight = weight
         self.size_average = size_average
         self.batch_average = batch_average
@@ -63,11 +63,11 @@ class SegmentationLosses(object):
         
     def kl_divergence(self, mu, log_var):
         kl = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
-        return kl
+        return kl.to(self.device)
     
     def mse_loss(self, input, target):
         recons_loss = torch.nn.functional.mse_loss(input, target, size_average= True, reduction  = 'mean')
-        return recons_loss
+        return recons_loss.to(self.device)
     
     def CrossEntropyLoss(self, logit, target):
         # n, c, h, w = logit.size()
@@ -93,8 +93,9 @@ class SegmentationLosses(object):
         # n, c, h, w = logit.size()
         criterion = nn.CrossEntropyLoss(weight=self.weight, ignore_index=self.ignore_index,
                                         size_average=self.size_average)
-        if self.cuda:
-            criterion = criterion.cuda()
+        # if self.cuda:
+        #     criterion = criterion.cuda()
+        criterion = criterion.to(self.device)
 
         logpt = -criterion(logit, target.long())
         pt = torch.exp(logpt)

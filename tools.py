@@ -80,7 +80,16 @@ def load_csv_plot_loss_miou():
     data2 = get_data(csv_file2)
     plot_mIou_f1score(data1, data2, 'logs/LikeUNet/run_2', 'VAEUNet')
     
-
+def compose_img_with_mask():
+    imgfilepath = 'in000616.jpg'
+    maskfilepath = 'gt000616.png'
+    img = cv2.imread(imgfilepath) 
+    label = cv2.imread(maskfilepath)
+    mask = label > 0
+    # mask = np.expand_dims(mask, axis=2)
+    # mask = np.repeat(mask, (1, 1, 3))
+    img = img*mask
+    cv2.imwrite('in000616_foreground.jpg', img)
 
 if __name__ == "__main__":
 
@@ -114,4 +123,5 @@ if __name__ == "__main__":
     # print(x)
     # x= x.repeat(1, 2, 1)
     # print(x)
-    load_csv_plot_loss_miou()
+    # load_csv_plot_loss_miou()
+    compose_img_with_mask()

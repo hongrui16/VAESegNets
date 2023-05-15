@@ -122,13 +122,13 @@ class bscGanWorker(object):
         self.threshold = 0.12   #mIoU: 0.108700, f1_score: 0.164000
         self.threshold = 0.115  #mIoU: 0.120300, f1_score: 0.176800
         self.threshold = 0.11   #mIoU: 0.133200, f1_score: 0.190300
-        self.threshold = 0.105  #mIoU: 0.123800, f1_score: 0.180600
-        self.threshold = 0.1    #mIoU: 0.116100, f1_score: 0.172300
-        self.threshold = 0.09   #mIoU: 0.113900, f1_score: 0.169800
-        self.threshold = 0.07   #mIoU: 0.101500, f1_score: 0.155600
-        self.threshold = 0.05   #mIoU: 0.090300, f1_score: 0.142100
+        # self.threshold = 0.105  #mIoU: 0.123800, f1_score: 0.180600
+        # self.threshold = 0.1    #mIoU: 0.116100, f1_score: 0.172300
+        # self.threshold = 0.09   #mIoU: 0.113900, f1_score: 0.169800
+        # self.threshold = 0.07   #mIoU: 0.101500, f1_score: 0.155600
+        # self.threshold = 0.05   #mIoU: 0.090300, f1_score: 0.142100
         
-
+        white_line = np.ones((256, 3, 3), np.uint8)*255
         for iter, sample in enumerate(tbar):
             if self.args.with_background:
                 image_f, label, background, img_names = sample['image'], sample['label'], sample['background'], sample['img_name']
@@ -158,17 +158,22 @@ class bscGanWorker(object):
 
             self.evaluator.add_batch(target.astype(int), pred.astype(int))
 
+
             groundtruth = np.expand_dims(target.astype(int)[0], axis=2)*255
             groundtruth = np.repeat(groundtruth, 3, axis=2)
 
-            segmentation = np.expand_dims(ori_pre[0], axis=2)
+            # segmentation = np.expand_dims(ori_pre[0], axis=2)
+            # segmentation = np.repeat(segmentation, 3, axis=2)
+
+            segmentation = np.expand_dims(pred.astype(int)[0], axis=2)
             segmentation = np.repeat(segmentation, 3, axis=2)
+
             # img_f = put_text_on_img(img_f, 'origin image')
             # img_rec_f = put_text_on_img(img_rec_f, 'recovery image')
             # groundtruth = put_text_on_img(groundtruth, 'groundtruth')
             # segmentation = put_text_on_img(segmentation, 'segmentation')
             img_f = transfer_tensor_to_bgr_image(image_f)
-            output = np.concatenate((img_f, groundtruth, segmentation), axis=1)
+            output = np.concatenate((img_f, white_line, groundtruth, white_line, segmentation), axis=1)
             output_filepath = os.path.join(self.output_img_dir, img_names[0])
             cv2.imwrite(output_filepath, output)
 
@@ -271,6 +276,7 @@ class LikeUNetWorker(object):
         # if self.args.master:
         #     print(f'rank {self.args.rank} num_img_tr: {num_img_tr}')
 
+        white_line = np.ones((256, 3, 3), np.uint8)*255
 
         for iter, sample in enumerate(tbar):
             # print(f'rank {self.args.rank} dataload time {round(time.time() - start, 3)}')
@@ -316,7 +322,7 @@ class LikeUNetWorker(object):
             # groundtruth = put_text_on_img(groundtruth, 'groundtruth')
             # segmentation = put_text_on_img(segmentation, 'segmentation')
             
-            output = np.concatenate((img_f, groundtruth, segmentation), axis=1)
+            output = np.concatenate((img_f, white_line, groundtruth, white_line, segmentation), axis=1)
             output_filepath = os.path.join(self.output_img_dir, img_names[0])
             cv2.imwrite(output_filepath, output)
 
@@ -409,6 +415,7 @@ class VAEUNetWorker(object):
         tbar = tqdm(self.testloader)
         # if self.args.master:
         #     print(f'rank {self.args.rank} num_img_tr: {num_img_tr}')
+        white_line = np.ones((256, 3, 3), np.uint8)*255
 
         for iter, sample in enumerate(tbar):
             # print(f'rank {self.args.rank} dataload time {round(time.time() - start, 3)}')
@@ -455,9 +462,11 @@ class VAEUNetWorker(object):
             # groundtruth = put_text_on_img(groundtruth, 'groundtruth')
             # segmentation = put_text_on_img(segmentation, 'segmentation')
             
-            imgs = np.concatenate((img_f, img_rec_f), axis=1)
-            segs = np.concatenate((groundtruth, segmentation), axis=1)
-            output = np.concatenate((imgs, segs), axis=0)
+            # imgs = np.concatenate((img_f, img_rec_f), axis=1)
+            # segs = np.concatenate((groundtruth, segmentation), axis=1)
+            # output = np.concatenate((imgs, segs), axis=0)
+            output = np.concatenate((img_f, white_line, groundtruth, white_line, segmentation), axis=1)
+
             output_filepath = os.path.join(self.output_img_dir, img_names[0])
             cv2.imwrite(output_filepath, output)
 
@@ -504,7 +513,8 @@ if __name__ == '__main__':
     # parser.add_argument('--model_name', type=str, default='bscGAN', help='model_name')
     # parser.add_argument('--model_name', type=str, default='LikeUNet', help='model_name')
     parser.add_argument('--model_name', type=str, default='VAEUNet', help='model_name')
-    
+    parser.add_argument('--dataset_name', type=str, default='cdnet', help='cdnet or bmc')
+
     opt = parser.parse_args()
 
     main(opt)
